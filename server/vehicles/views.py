@@ -1,4 +1,6 @@
 from rest_framework import generics
+from rest_framework.response import Response
+from rest_framework.views import APIView
 from .serializers import ( 
     VehicleSerializer, 
     VehicleRequestSerializer,
@@ -8,8 +10,10 @@ from .serializers import (
 from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
 from utils.permissions import IsAdminOrCreateReadOnly
 from .models import Vehicle, VehicleRequest
+from django.contrib.auth import get_user_model
 # Create your views here.
 
+User = get_user_model()
 class VehicleListCreateView(generics.ListCreateAPIView):
     queryset = Vehicle.objects.all()
     serializer_class = VehicleSerializer
@@ -56,4 +60,27 @@ class VehicleRequestActionView(generics.RetrieveUpdateDestroyAPIView):
         if self.request.method == 'PATCH':
             return [IsAdminUser()]
         return[IsAuthenticated()]
+    
+class DispatchDataView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminUser]
+    
+    def get(self, request):
+        trips = VehicleRequest.objects.filter(status__in=['approved', 'assigned']).values(
+            'id', 'name', 'from_location', 'to_location', 'date', 'status',
+            'assigned_vehicle_id', 'assigned_driver_id'
+        )
+        
+        vehicles = Vehicle.objects.all().values(
+            'id', 'model_name', 'status', 'mileage', 'assigned_to__full_name'
+        )
+        
+        drivers = User.objects.filter(role='driver', is_active=True).values(
+            'id', 'full_name'
+        )
+
+        return Response({
+            'trips': list(trips),
+            'vehicles': list(vehicles),
+            'drivers': list(drivers),
+        })
     

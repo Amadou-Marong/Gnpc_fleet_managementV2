@@ -3,7 +3,8 @@ from .views import (
     VehicleListCreateView,
     VehicleRetrieveUpdateDestroyView,
     VehicleRequestListCreateView,
-    VehicleRequestActionView
+    VehicleRequestActionView,
+    DispatchDataView
 )
 
 urlpatterns = [
@@ -12,5 +13,7 @@ urlpatterns = [
     
     path('vehicles/requests/', VehicleRequestListCreateView.as_view(), name='requests'),
     
-    path('vehicles/requests/<int:pk>/', VehicleRequestActionView.as_view(), name='vehicle-request-detail')
+    path('vehicles/requests/<int:pk>/', VehicleRequestActionView.as_view(), name='vehicle-request-detail'),
+    
+    path('vehicles/dispatch-data/', DispatchDataView.as_view(), name='dispatch-data')
 ]
