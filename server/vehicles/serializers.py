@@ -79,7 +79,7 @@ class VehicleRequestAssignSerializer(serializers.ModelSerializer):
         # If reassigning a different vehicle, free up the previous one
         if instance.assigned_vehicle and instance.assigned_vehicle != vehicle:
             old_vehicle = instance.assigned_vehicle
-            old_vehicle.status = 'assigned'
+            old_vehicle.status = 'available'
             old_vehicle.assigned_to = None
             old_vehicle.save()
             
