@@ -13,7 +13,6 @@ class VehicleSerializer(serializers.ModelSerializer):
         
     def get_assigned_to_name(self, obj):
         return obj.assigned_to.full_name if obj.assigned_to else "Unassigned"
-    
 
 class VehicleRequestSerializer(serializers.ModelSerializer):
     created_by = UserSerializer(read_only=True)

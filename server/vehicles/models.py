@@ -34,6 +34,7 @@ class VehicleRequest(models.Model):
         ('approved', 'Approved'),
         ('assigned', 'Assigned'),
         ('rejected', 'Rejected'),
+        ('completed', 'Completed')
     )
     name = models.CharField(max_length=255)
     department = models.CharField(max_length=20, choices=DEPARTMENT_CHOICES)

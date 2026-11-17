@@ -1,138 +1,112 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { AVAILABILITY, DRIVERS, VEHICLES, VEHICLE_STATUS_STYLES } from '../data/dummyData.ts';
+import { computed, onMounted, ref } from 'vue'
+// import { AVAILABILITY, DRIVERS, VEHICLES, VEHICLE_STATUS_STYLES } from '../data/dummyData.ts';
 import { toast } from 'vue3-toastify'
 import 'vue3-toastify/dist/index.css'
 import api from '../api/api.ts';
 import Badge from '../components/Badge.vue';
 
-const FLEET_TOTAL = AVAILABILITY.reduce((sum, s) => sum + s.count, 0)
-
-// const TRIPS = [
-//   { id: 'TRIP-001', destination: 'Basse Station' },
-//   { id: 'TRIP-002', destination: 'Farafenni Station' },
-//   { id: 'TRIP-003', destination: 'Sanyang Station' },
-// ]
 
 // Reactive State
 const trips = ref<any[]>([])
 const vehicles = ref<any[]>([])
 const drivers = ref<any[]>([])
-const activeTab = ref('assign')
-const tripSelections = ref<Record<number, { vehicleId?: number; driverId?: number }>>({})
-const assignedTrips = ref<Record<number, { vehicleId: number; driverId: number }>>({})
+const FLEET_TOTAL = ref<number>(0)
 const isSubmitting = ref<Record<number, boolean>>({})
+const activeTab = ref('assign')
 
-// const getDispatchData = async () => {
-//   try {
-//     const response = await api.get('vehicles/dispatch-data/')
-//     console.log(response.data);
-//     trips.value = response.data.trips
-//     vehicles.value = response.data.vehicles
-//     drivers.value = response.data.drivers
-//   } catch (error: any) {
-//     console.log(error.response.data);
-//   }
-// }
+const stats = ref({
+  available: 0,
+  in_use: 0,
+  maintenance: 0,
+  out_of_service: 0,
+  total: 0,
+})
 
+const availability = computed(() => [
+  { label: 'Available', count: stats.value.available, color: 'bg-emerald-500', text: 'text-emerald-700', bg: 'bg-emerald-50' },
+  { label: 'In use', count: stats.value.in_use, color: 'bg-[#123a63]', text: 'text-[#123a63]', bg: 'bg-blue-50' },
+  { label: 'Maintenance', count: stats.value.maintenance, color: 'bg-amber-500', text: 'text-amber-700', bg: 'bg-amber-50' },
+  { label: 'Out of service', count: stats.value.out_of_service, color: 'bg-rose-500', text: 'text-rose-700', bg: 'bg-rose-50' },
+])
+
+// Fetch Data
 const getDispatchData = async () => {
   try {
     const response = await api.get('vehicles/dispatch-data/')
-    trips.value = response.data.trips
     vehicles.value = response.data.vehicles
     drivers.value = response.data.drivers
+    stats.value = response.data.stats
+    FLEET_TOTAL.value = response.data.stats.total
 
-    // Pre-populate already assigned trips from backend if returned
-    response.data.trips.forEach((trip: any) => {
-      if (trip.assigned_vehicle && trip.assigned_driver) {
-        assignedTrips.value[trip.id] = {
-          vehicleId: trip.assigned_vehicle,
-          driverId: trip.assigned_driver,
-        }
-        tripSelections.value[trip.id] = {
-          vehicleId: trip.assigned_vehicle,
-          driverId: trip.assigned_driver,
-        }
-      }
-    })
+    // Map backend fields (assigned_vehicle_id / assigned_driver_id) to draft dropdown fields
+    trips.value = response.data.trips.map((trip: any) => ({
+      ...trip,
+      draftVehicleId: trip.assigned_vehicle_id ?? '',
+      draftDriverId: trip.assigned_driver_id ?? '',
+    }))
   } catch (error: any) {
     console.error(error.response?.data || error)
     toast.error('Failed to load dispatch data.')
   }
 }
 
-onMounted(async () => {
-  await getDispatchData()
-})
+onMounted(getDispatchData)
 
-// {
-//   "assigned_vehicle": 1,
-//   "assigned_driver": 2
-// }
-
-
-// Methods
-const updateSelection = (tripId: number, field: 'vehicleId' | 'driverId', rawValue: string) => {
-  const value = rawValue ? Number(rawValue) : undefined
-  tripSelections.value[tripId] = {
-    ...(tripSelections.value[tripId] || {}),
-    [field]: value,
-  }
+// Check if vehicle/driver is already assigned to another trip ON THE SAME DATE
+const isAssignedElsewhere = (
+  currentTrip: any,
+  field: 'assigned_vehicle_id' | 'assigned_driver_id',
+  id: number
+) => {
+  return trips.value.some(
+    (t) =>
+      t.id !== currentTrip.id &&
+      t.date === currentTrip.date &&
+      t[field] === id
+  )
 }
 
-
-const handleAssign = async (tripId: number) => {
-  const selection = tripSelections.value[tripId] || {}
-
-  if (!selection.vehicleId || !selection.driverId) {
+// Assign or Reassign Trip
+const handleAssign = async (trip: any) => {
+  if (!trip.draftVehicleId || !trip.draftDriverId) {
     toast.error('Select both a vehicle and a driver first.')
     return
   }
 
-  const conflictingTrip = Object.entries(assignedTrips.value).find(
-    ([assignedTripId, assignment]) =>
-      Number(assignedTripId) !== tripId &&
-      (assignment.vehicleId === selection.vehicleId || assignment.driverId === selection.driverId)
-  )
+  const hasConflict =
+    isAssignedElsewhere(trip, 'assigned_vehicle_id', trip.draftVehicleId) ||
+    isAssignedElsewhere(trip, 'assigned_driver_id', trip.draftDriverId)
 
-  if (conflictingTrip) {
-    toast.error('A driver or vehicle can only be assigned to one trip at a time.')
+  if (hasConflict) {
+    toast.error(`This vehicle or driver is already assigned to another trip on ${trip.date}.`)
     return
   }
 
   try {
-    isSubmitting.value[tripId] = true
-    await api.patch(`http://127.0.0.1:8000/api/vehicles/requests/${tripId}/`,{
-      assigned_vehicle: selection.vehicleId,
-      assigned_driver: selection.driverId,
+    isSubmitting.value[trip.id] = true
+    await api.patch(`vehicles/requests/${trip.id}/`, {
+      assigned_vehicle: trip.draftVehicleId,
+      assigned_driver: trip.draftDriverId,
     })
 
-    assignedTrips.value[tripId] = {
-      vehicleId: selection.vehicleId,
-      driverId: selection.driverId,
-    }
     toast.success('Trip assigned successfully!')
-    await getDispatchData() // Refresh vehicle statuses & lists
+    await getDispatchData()
   } catch (error: any) {
     toast.error(error.response?.data?.error || 'Failed to assign trip.')
   } finally {
-    isSubmitting.value[tripId] = false
+    isSubmitting.value[trip.id] = false
   }
 }
 
-const isAssignedElsewhere = (tripId: number, field: 'vehicleId' | 'driverId', value: number) => {
-  return Object.entries(assignedTrips.value).some(
-    ([assignedTripId, assignment]) =>
-      Number(assignedTripId) !== tripId && assignment[field] === value
-  )
-}
+
 </script>
 
 <template>
     <!-- Availability Cards -->
     <div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
       <div
-        v-for="a in AVAILABILITY"
+        v-for="a in availability"
         :key="a.label"
         class="rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
       >
@@ -199,16 +173,18 @@ const isAssignedElsewhere = (tripId: number, field: 'vehicleId' | 'driverId', va
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-200 bg-white">
-            <!-- <tr v-for="trip in TRIPS" :key="trip.id"> -->
             <tr v-for="trip in trips" :key="trip.id">
               <td class="whitespace-nowrap px-6 py-4">
-                <div class="text-sm font-medium text-gray-700">#{{trip.id}} {{ trip.name }}</div>
-                <div class="text-xs text-gray-500">{{ trip.from_location }} -> {{ trip.to_location }}</div>
+                <div class="text-sm font-medium text-gray-700">#{{ trip.id }} {{ trip.name }}</div>
+                <div class="text-xs text-gray-500">
+                  {{ trip.from_location }} -> {{ trip.to_location }} • {{ trip.date }}
+                </div>
               </td>
+
+              <!-- Vehicle Dropdown -->
               <td class="px-6 py-4">
                 <select
-                  :value="tripSelections[trip.id]?.vehicleId || ''"
-                  @change="updateSelection(trip.id, 'vehicleId', $event.target.value)"
+                  v-model="trip.draftVehicleId"
                   class="w-full rounded-md border border-gray-300 p-2 text-sm text-gray-700 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500"
                 >
                   <option value="">Select vehicle</option>
@@ -216,16 +192,17 @@ const isAssignedElsewhere = (tripId: number, field: 'vehicleId' | 'driverId', va
                     v-for="vehicle in vehicles"
                     :key="vehicle.id"
                     :value="vehicle.id"
-                    :disabled="isAssignedElsewhere(trip.id, 'vehicleId', vehicle.id)"
+                    :disabled="vehicle.status === 'maintenance' || vehicle.status === 'out_of_service' || isAssignedElsewhere(trip, 'assigned_vehicle_id', vehicle.id)"
                   >
-                    {{ vehicle.id }} - {{ vehicle.model_name }}
+                    {{ vehicle.id }} - {{ vehicle.model_name }} ({{ vehicle.status }})
                   </option>
                 </select>
               </td>
+
+              <!-- Driver Dropdown -->
               <td class="px-6 py-4">
                 <select
-                  :value="tripSelections[trip.id]?.driverId || ''"
-                  @change="updateSelection(trip.id, 'driverId', ($event.target as HTMLSelectElement).value)"
+                  v-model="trip.draftDriverId"
                   class="w-full rounded-md border border-gray-300 p-2 text-sm text-gray-700 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500"
                 >
                   <option value="">Select driver</option>
@@ -233,24 +210,28 @@ const isAssignedElsewhere = (tripId: number, field: 'vehicleId' | 'driverId', va
                     v-for="driver in drivers"
                     :key="driver.id"
                     :value="driver.id"
-                    :disabled="isAssignedElsewhere(trip.id, 'driverId', driver.id)"
+                    :disabled="isAssignedElsewhere(trip, 'assigned_driver_id', driver.id)"
                   >
                     {{ driver.full_name }}
                   </option>
                 </select>
               </td>
+
+              <!-- Action Button -->
               <td class="px-6 py-4">
                 <button
                   type="button"
                   :disabled="isSubmitting[trip.id]"
                   class="rounded-md bg-green-800 px-3 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
-                  @click="handleAssign(trip.id)"
+                  @click="handleAssign(trip)"
                 >
-                  {{ assignedTrips[trip.id] ? 'Reassign' : 'Assign' }}
+                  {{ trip.assigned_vehicle_id && trip.assigned_driver_id ? 'Reassign' : 'Assign' }}
                 </button>
               </td>
             </tr>
           </tbody>
+
+
         </table>
       </div>
     </div>

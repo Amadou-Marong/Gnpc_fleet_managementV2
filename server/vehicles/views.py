@@ -1,6 +1,7 @@
 from rest_framework import generics
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from django.db.models import Count, Q
 from .serializers import ( 
     VehicleSerializer, 
     VehicleRequestSerializer,
@@ -60,11 +61,20 @@ class VehicleRequestActionView(generics.RetrieveUpdateDestroyAPIView):
         if self.request.method == 'PATCH':
             return [IsAdminUser()]
         return[IsAuthenticated()]
-    
+
 class DispatchDataView(APIView):
     permission_classes = [IsAuthenticated, IsAdminUser]
     
     def get(self, request):
+        # 1. Single-query aggregation for fleet stats
+        stats = Vehicle.objects.aggregate(
+            available=Count('id', filter=Q(status='available')),
+            in_use=Count('id', filter=Q(status='in_use')),
+            maintenance=Count('id', filter=Q(status='maintenance')),
+            out_of_service=Count('id', filter=Q(status='out_of_service')),
+            total=Count('id')
+        )
+        
         trips = VehicleRequest.objects.filter(status__in=['approved', 'assigned']).values(
             'id', 'name', 'from_location', 'to_location', 'date', 'status',
             'assigned_vehicle_id', 'assigned_driver_id'
@@ -77,10 +87,11 @@ class DispatchDataView(APIView):
         drivers = User.objects.filter(role='driver', is_active=True).values(
             'id', 'full_name'
         )
+        
 
         return Response({
+            'stats': stats,
             'trips': list(trips),
             'vehicles': list(vehicles),
             'drivers': list(drivers),
         })
-    
